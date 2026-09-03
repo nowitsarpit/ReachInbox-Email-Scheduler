@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+@theme {
+  /* Typography */
+  --font-sans: "Inter", "system-ui", "sans-serif";
+  --font-mono: "JetBrains Mono", "Fira Code", "monospace";
+
+  /* Color Palette — Slate-based professional dark */
+  --color-surface-0: #0a0b0d;
+  --color-surface-1: #111318;
+  --color-surface-2: #1a1d24;
+  --color-surface-3: #22262f;
+  --color-surface-4: #2c3140;
+
+  --color-border: #2d323d;
+  --color-border-subtle: #1f2330;
+
+  --color-text-primary: #e8eaf0;
+  --color-text-secondary: #8892a4;
+  --color-text-muted: #5a6375;
+  --color-text-disabled: #3d4455;
+
+  /* Brand accent — indigo */
+  --color-accent: #6366f1;
+  --color-accent-hover: #5254cc;
+  --color-accent-dim: #1e1f4a;
+  --color-accent-text: #a5b4fc;
+
+  /* Semantic colors */
+  --color-success: #22c55e;
+  --color-success-dim: #052e16;
+  --color-warning: #f59e0b;
+  --color-warning-dim: #2d1800;
+  --color-error: #ef4444;
+  --color-error-dim: #2d0808;
+  --color-info: #38bdf8;
+  --color-info-dim: #082030;
+}
+
+/* Base */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--color-surface-0);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-surface-1);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-4);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Focus ring */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Selection */
+::selection {
+  background: var(--color-accent-dim);
+  color: var(--color-accent-text);
+}
+
+/* Animations */
+@media (prefers-reduced-motion: no-preference) {
+  .animate-fade-in {
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.2s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}

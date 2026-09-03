@@ -1,0 +1,520 @@
+// This is your Prisma schema file
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Organization & Users ───────────────────────────────────────────────────
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  avatarUrl   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  members     OrganizationMember[]
+  campaigns   Campaign[]
+  contacts    Contact[]
+  suppressions Suppression[]
+  senders     Sender[]
+  templates   Template[]
+  apiKeys     ApiKey[]
+  webhooks    Webhook[]
+  auditLogs   AuditLog[]
+
+  @@index([slug])
+  @@index([deletedAt])
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String?
+  avatarUrl     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  lastLoginAt   DateTime?
+  deactivatedAt DateTime?
+
+  oauthIdentities OAuthIdentity[]
+  memberships     OrganizationMember[]
+  sessions        Session[]
+  auditLogs       AuditLog[]
+
+  @@index([email])
+  @@index([deactivatedAt])
+}
+
+model OAuthIdentity {
+  id             String   @id @default(cuid())
+  userId         String
+  provider       String   // "google"
+  providerSub    String   // stable Google "sub"
+  email          String
+  name           String?
+  avatarUrl      String?
+  accessToken    String?  // encrypted, optional storage
+  refreshToken   String?  // encrypted, optional storage
+  idToken        String?  // stored temporarily for nonce validation
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerSub])
+  @@unique([provider, email])
+  @@index([userId])
+  @@index([providerSub])
+}
+
+model OrganizationMember {
+  id             String           @id @default(cuid())
+  organizationId String
+  userId         String
+  role           OrganizationRole @default(MEMBER)
+  invitedAt      DateTime         @default(now())
+  joinedAt       DateTime?
+  removedAt      DateTime?
+
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+  @@index([removedAt])
+}
+
+enum OrganizationRole {
+  OWNER
+  ADMIN
+  OPERATOR
+  MEMBER
+  VIEWER
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  organizationId   String
+  sessionTokenHash String    @unique // SHA-256 of the actual token
+  createdAt        DateTime  @default(now())
+  expiresAt        DateTime
+  lastSeenAt       DateTime  @default(now())
+  revokedAt        DateTime?
+  userAgent        String?
+  ipAddress        String?
+
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([sessionTokenHash])
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+}
+
+// ─── Campaign ───────────────────────────────────────────────────────────────
+
+model Campaign {
+  id             String         @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  status         CampaignStatus @default(DRAFT)
+  deliveryMode   DeliveryMode   @default(IMMEDIATE)
+  delayMs        Int?           // for FIXED_GAP mode
+  scheduledAt    DateTime?      // when first job becomes eligible
+  startedAt      DateTime?
+  completedAt    DateTime?
+  cancelledAt    DateTime?
+  pausedAt       DateTime?
+  failedAt       DateTime?
+  failureReason  String?
+
+  // Composed email
+  subject        String?
+  htmlBody       String?        @db.Text
+  textBody       String?        @db.Text
+
+  // Sender reference
+  senderId       String?
+
+  // Aggregates (updated by worker)
+  totalRecipients    Int @default(0)
+  pendingCount       Int @default(0)
+  scheduledCount     Int @default(0)
+  processingCount    Int @default(0)
+  sentCount          Int @default(0)
+  failedCount        Int @default(0)
+  deferredCount      Int @default(0)
+  cancelledCount     Int @default(0)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  sender         Sender?          @relation(fields: [senderId], references: [id])
+  recipients     CampaignRecipient[]
+  deliveryJobs   DeliveryJob[]
+  deliveryEvents DeliveryEvent[]
+  outboxEvents   OutboxEvent[]
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([organizationId, status])
+  @@index([scheduledAt])
+  @@index([deletedAt])
+}
+
+enum CampaignStatus {
+  DRAFT
+  READY
+  SCHEDULED
+  RUNNING
+  PAUSED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+enum DeliveryMode {
+  IMMEDIATE
+  FIXED_GAP
+}
+
+model CampaignRecipient {
+  id             String          @id @default(cuid())
+  campaignId     String
+  organizationId String
+  email          String
+  firstName      String?
+  lastName       String?
+  company        String?
+  customFields   Json?
+  status         RecipientStatus @default(PENDING)
+  idempotencyKey String          @unique // SHA-256(campaignId:normalizedEmail)
+  importedAt     DateTime        @default(now())
+  scheduledAt    DateTime?
+  processedAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  campaign       Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  deliveryJob    DeliveryJob?
+
+  @@index([campaignId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([campaignId, status])
+  @@index([idempotencyKey])
+  @@index([scheduledAt])
+}
+
+enum RecipientStatus {
+  PENDING
+  SCHEDULED
+  DEFERRED
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+  SUPPRESSED
+}
+
+// ─── Delivery ───────────────────────────────────────────────────────────────
+
+model DeliveryJob {
+  id               String          @id @default(cuid())
+  campaignId       String
+  organizationId   String
+  recipientId      String          @unique
+  idempotencyKey   String          @unique // same as recipient's
+  status           DeliveryJobStatus @default(QUEUED)
+  bullJobId        String?         // BullMQ job ID
+  attempt          Int             @default(0)
+  maxAttempts      Int             @default(5)
+  scheduledAt      DateTime?
+  processingAt     DateTime?       // when worker claimed it
+  leaseExpiresAt   DateTime?       // stale lease detection
+  sentAt           DateTime?
+  failedAt         DateTime?
+  deferredUntil    DateTime?
+  lastError        String?
+  lastErrorCode    String?
+  providerMessageId String?        // SMTP message ID from provider
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  campaign         Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  recipient        CampaignRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  events           DeliveryEvent[]
+
+  @@index([campaignId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([campaignId, status])
+  @@index([idempotencyKey])
+  @@index([scheduledAt])
+  @@index([leaseExpiresAt])
+}
+
+enum DeliveryJobStatus {
+  QUEUED
+  SCHEDULED
+  DEFERRED
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+model DeliveryEvent {
+  id             String    @id @default(cuid())
+  campaignId     String
+  organizationId String
+  jobId          String
+  event          String    // queued, scheduled, processing, sent, failed, deferred, cancelled, retry
+  metadata       Json?
+  occurredAt     DateTime  @default(now())
+
+  campaign       Campaign    @relation(fields: [campaignId], references: [id])
+  job            DeliveryJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@index([organizationId])
+  @@index([jobId])
+  @@index([event])
+  @@index([occurredAt])
+}
+
+// ─── Contacts ───────────────────────────────────────────────────────────────
+
+model Contact {
+  id             String    @id @default(cuid())
+  organizationId String
+  email          String
+  firstName      String?
+  lastName       String?
+  company        String?
+  customFields   Json?
+  tags           String[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([email])
+  @@index([organizationId, email])
+  @@index([deletedAt])
+}
+
+model Suppression {
+  id             String            @id @default(cuid())
+  organizationId String
+  email          String
+  reason         SuppressionReason
+  note           String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([email])
+  @@index([organizationId, email])
+}
+
+enum SuppressionReason {
+  UNSUBSCRIBED
+  BOUNCED
+  BLOCKED
+  MANUAL
+  COMPLAINT
+}
+
+// ─── Senders ───────────────────────────────────────────────────────────────
+
+model Sender {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  email          String
+  replyTo        String?
+  status         SenderStatus @default(ACTIVE)
+  dailyLimit     Int?
+  hourlyLimit    Int?
+  minGapMs       Int?         // minimum milliseconds between sends
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  campaigns      Campaign[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([status])
+}
+
+enum SenderStatus {
+  ACTIVE
+  PAUSED
+  SUSPENDED
+}
+
+// ─── Templates ────────────────────────────────────────────────────────────
+
+model Template {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  subject        String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  versions       TemplateVersion[]
+
+  @@index([organizationId])
+  @@index([deletedAt])
+}
+
+model TemplateVersion {
+  id          String   @id @default(cuid())
+  templateId  String
+  version     Int
+  subject     String
+  htmlBody    String   @db.Text
+  textBody    String?  @db.Text
+  note        String?
+  createdAt   DateTime @default(now())
+  createdById String?
+
+  template    Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, version])
+  @@index([templateId])
+}
+
+// ─── API Keys ────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  prefix         String    // first 8 chars of key for display
+  keyHash        String    @unique // SHA-256 of the full key
+  scopes         String[]  // permissions granted
+  expiresAt      DateTime?
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@index([keyHash])
+  @@index([revokedAt])
+}
+
+// ─── Webhooks ────────────────────────────────────────────────────────────
+
+model Webhook {
+  id             String    @id @default(cuid())
+  organizationId String
+  url            String
+  secret         String    // HMAC signing secret (hashed or encrypted)
+  events         String[]  // subscribed event types
+  active         Boolean   @default(true)
+  description    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  deliveries     WebhookDelivery[]
+
+  @@index([organizationId])
+  @@index([active])
+}
+
+model WebhookDelivery {
+  id           String    @id @default(cuid())
+  webhookId    String
+  event        String
+  payload      Json
+  responseCode Int?
+  responseBody String?
+  attempt      Int       @default(1)
+  deliveredAt  DateTime?
+  failedAt     DateTime?
+  nextRetryAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  webhook      Webhook   @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([event])
+  @@index([nextRetryAt])
+  @@index([createdAt])
+}
+
+// ─── Audit Log ───────────────────────────────────────────────────────────
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String?
+  action         String
+  resourceType   String?
+  resourceId     String?
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  occurredAt     DateTime @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  user           User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+  @@index([occurredAt])
+  @@index([organizationId, occurredAt])
+}
+
+// ─── Outbox (transactional outbox pattern) ──────────────────────────────
+
+model OutboxEvent {
+  id          String    @id @default(cuid())
+  campaignId  String?
+  eventType   String    // the queue/action to trigger
+  payload     Json
+  processedAt DateTime?
+  failedAt    DateTime?
+  attempts    Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  campaign    Campaign? @relation(fields: [campaignId], references: [id])
+
+  @@index([processedAt])
+  @@index([failedAt])
+  @@index([createdAt])
+}

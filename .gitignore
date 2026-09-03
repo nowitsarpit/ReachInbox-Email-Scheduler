@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+.next/
+out/
+build/
+
+# Environment files — prevent leaks to git
+.env
+.env*
+*.env
+**/.env
+**/.env*
+**/.env.local
+**/.env.*.local
+backend/.env
+frontend/.env*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+playwright-report/
+test-results/
